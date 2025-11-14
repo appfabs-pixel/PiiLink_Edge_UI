@@ -14,14 +14,16 @@ import BackIcon from "../../assests/images/arrow-left.svg";
 import PlusIcon from "../../assests/images/plus.svg";
 import SectionTabs from "../../components/SectionTabs";
 import { v4 as uuidv4 } from "uuid";
-import DevicePrimary from "./DevicePrimary";  
+import DevicePrimary from "./DevicePrimary";
 import {
-  getDevice,
+  
+  getAllDevices,
   getAllDeviceServices,
-  getDevices,
+  getAllDeviceProfiles,
   addDevice,
-  deleteDevice, 
+  deleteDevice,
 } from "../../services/edgexApi";
+
 
 const TABLE_HEAD = [
   "Device Name",
@@ -41,7 +43,6 @@ const TAB_HEADING = [
 const Device = () => {
   const [isModalShow, setIsModalShow] = useState(false);
   const [isListView, setIsListView] = useState(true);
-  const [activeTab, setActiveTab] = useState(TAB_HEADING[0].id);
   const [loading, setLoading] = useState(true);
   const [devices, setDevices] = useState([]);
   const [deviceServices, setDeviceServices] = useState([]);
@@ -49,27 +50,24 @@ const Device = () => {
   const [step, setStep] = useState(1);
   const [selectedProfile, setSelectedProfile] = useState(null);
   const [deviceProfiles, setDeviceProfiles] = useState([]);
-  const [selectedIds, setSelectedIds] = useState([]);
   const [selectedDevices, setSelectedDevices] = useState([]);
-
+  const [autoEvents, setAutoEvents] = useState([]);
+  const [showAutoEventForm, setShowAutoEventForm] = useState(false);
 
   const [formValues, setFormValues] = useState({
     name: "",
     description: "",
     labels: "",
-    adminState: "",
+    adminState: "UNLOCKED", 
   });
 
-  const handleFormChange = useCallback((field, value) => {
-    setFormValues((prev) => ({ ...prev, [field]: value }));
-  }, []);
-
-  const handleFormDataChange = useCallback((formData) => {
-    setFormValues(formData);
-  }, []);
-
+ 
   const modalToggleHandler = (show) => {
     setIsModalShow(show);
+    if (!show) {
+      setShowAutoEventForm(false);
+      setAutoEvents([]);
+    }
   };
 
   const viewHandler = (show) => {
@@ -84,99 +82,179 @@ const Device = () => {
     if (step > 1) setStep(step - 1);
   };
 
+ 
+  const extractResourcesFromProfile = (profile) => {
+  if (!profile) return [];
+
+  const resources = [];
+
+  //  deviceResources
+  if (Array.isArray(profile.deviceResources)) {
+    profile.deviceResources.forEach((res) => {
+      if (res.name) resources.push(res.name);
+    });
+  }
+
+  
+  if (Array.isArray(profile.deviceCommands)) {
+    profile.deviceCommands.forEach((cmd) => {
+      if (cmd.name) resources.push(cmd.name);
+    });
+  }
+
+  return resources;
+};
+  
+  const availableResources = useMemo(() => {
+    if (selectedProfile && deviceProfiles.length > 0) {
+      const profile = deviceProfiles.find((p) => p.name === selectedProfile);
+    return profile ? extractResourcesFromProfile(profile) : [];
+    }
+    return [];
+  }, [selectedProfile, deviceProfiles]);
+
+  
+  const handleAddAutoEvent = () => {
+    setShowAutoEventForm(true);
+    const defaultResource = availableResources.length > 0 ? availableResources[0] : "";
+    setAutoEvents([
+      { interval: "30", unit: "second", onChange: "false", resource: defaultResource },
+    ]);
+  };
+
+  const handleAutoEventChange = (index, field, value) => {
+    const updatedEvents = [...autoEvents];
+    updatedEvents[index][field] = value;
+    setAutoEvents(updatedEvents);
+  };
+
+  const handleRemoveAutoEvent = (index) => {
+    const updatedEvents = autoEvents.filter((_, i) => i !== index);
+    setAutoEvents(updatedEvents);
+  };
+
+  const handleAddMoreAutoEvent = () => {
+    const defaultResource = availableResources.length > 0 ? availableResources[0] : "";
+    setAutoEvents([
+      ...autoEvents,
+      { interval: "30", unit: "second", onChange: "false", resource: defaultResource },
+    ]);
+  };
+
+  
   const handleAddSave = async (formValues) => {
-  try {
-    const payload = [
-      {
-        apiVersion: "v3",
-        requestId: uuidv4(),
-        device: {
-          name: formValues.name,
-          description: formValues.description,
-          adminState: formValues.adminState
-            ? formValues.adminState.toUpperCase()
-            : "UNLOCKED",
-          operatingState: "UP",
-          labels: formValues.labels ? formValues.labels.split(",") : [],
-          serviceName: selectedService,
-          profileName: selectedProfile,
-          protocols: {
-            opcua: {
-              Endpoint: "opc.tcp://localhost:4840" // ✅ must be valid
-            }
+    try {
+      const hasAutoEvents = autoEvents.length > 0 && autoEvents[0].resource;
+      
+      const payload = [
+        {
+          apiVersion: "v3",
+          requestId: uuidv4(),
+          device: {
+            name: formValues.name,
+            description: formValues.description,
+            adminState: formValues.adminState ? formValues.adminState.toUpperCase() : "UNLOCKED",
+            operatingState: "UP",
+            labels: formValues.labels ? formValues.labels.split(",").map(label => label.trim()) : [],
+            serviceName: selectedService,
+            profileName: selectedProfile,
+            protocols: {
+              
+              Other: {
+                Address: "localhost",
+                Port: "1234",
+                UnitID: "1"
+              }
+            },
+            autoEvents: hasAutoEvents ? autoEvents.map(event => ({
+              interval: `${event.interval}${event.unit === 'millisecond' ? 'ms' : event.unit === 'minute' ? 'm' : event.unit === 'hour' ? 'h' : 's'}`,
+              onChange: event.onChange === "true",
+              sourceName: event.resource
+            })) : [],
           },
-          autoEvents: [
-            {
-              interval: "5ms",
-              onChange: false,
-              sourceName: "Random"
-            }
-          ],
-        },
-      },
-    ];
-
-
-
-
-await addDevice(payload, {
-headers: { "Content-Type": "application/json" },
-});
-
-
-      const res = await getDevices();
-      const fetchedDevices = res.data.devices || [];
-
-      const formattedDevices = fetchedDevices.map((d) => ({
-        id: d.id || d.name,
-        name: d.name,
-        status: d.adminState || "UNKNOWN",
-        // associatedCount: d.labels?.length || 0,
-        url: d.serviceName || "N/A",
-        operatingStatus: d.operatingState || "N/A",
-        lastConnected: d.lastConnected || "N/A",
-        lastReported: d.lastReported || "N/A",
-      }));
-
-      setDevices(formattedDevices);
+        }
+      ];
+      
+      await addDevice(payload);
+      await new Promise(resolve => setTimeout(resolve, 1000)); 
+      await fetchDevices();
       setIsModalShow(false);
+      
     } catch (error) {
-      console.error("Error adding device:", error?.response?.data || error.message);
+      console.error("Error adding device:", error);
     }
   };
 
-  useEffect(() => {
-    const fetchDevices = async () => {
-      try {
-        const response = await getDevice();
-        const fetchedDevices = response.data.devices || [];
-        if (fetchedDevices.length > 0) {
-          const formattedDevices = fetchedDevices.map((d) => ({
-            id: d.id || d.name, 
-            name: d.name,
-            status: d.adminState || d.status || "UNKNOWN",
-            // associatedCount: d.labels?.length || d.associatedCount || 0,
-            url: d.serviceName || d.url || "N/A",
-            operatingStatus: d.operatingState || d.operatingStatus || "N/A",
-            lastConnected: d.lastConnected || "N/A",
-            lastReported: d.lastReported || "N/A",
-          }));
-          setDevices(formattedDevices);
-        }
-      } catch (error) {
-        console.error("Error fetching devices:", error);
-      } finally {
-        setLoading(false);
+  
+  const handleDeleteDevice = async () => {
+    if (selectedDevices.length === 0) return;
+    
+    
+    const deviceId = selectedDevices[0]; 
+    const device = devices.find(d => d.id === deviceId);
+    if (!device) return;
+
+    try {
+      await deleteDevice(device.name); 
+      await fetchDevices();
+      setSelectedDevices([]);
+    } catch (err) {
+      console.error("Delete error:", err);
+    }
+  };
+
+ 
+  const handleDeviceClick = (deviceId) => {
+    
+    setSelectedDevices([deviceId]);
+  };
+
+
+  const fetchDevices = useCallback(async () => {
+    try {
+      setLoading(true);
+      const response = await getAllDevices();
+      const fetchedDevices = response.data.devices || [];
+      
+      if (fetchedDevices.length > 0) {
+        const formattedDevices = fetchedDevices.map((d) => ({
+          id: d.id || d.name, 
+          name: d.name,
+          status: d.adminState || "UNKNOWN",
+          associatedCount: d.profileName || "N/A", 
+          url: d.serviceName || "N/A",
+          operatingStatus: d.operatingState || "N/A",
+          lastConnected: d.lastConnected ? new Date(d.lastConnected).toLocaleString() : "N/A",
+          lastReported: d.lastReported ? new Date(d.lastReported).toLocaleString() : "N/A",
+        }));
+        setDevices(formattedDevices);
+      } else {
+        setDevices([]);
       }
-    };
+    } catch (error) {
+      console.error("Error fetching devices:", error);
+      setDevices([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []); 
+
+  useEffect(() => {
     fetchDevices();
-  }, []);
+  }, [fetchDevices]);
+
 
   useEffect(() => {
     if (isModalShow) {
       getAllDeviceServices()
-        .then((res) => setDeviceServices(res.data.services || []))
-        .catch(() => setDeviceServices([]));
+        .then((res) => {
+          setDeviceServices(res.data.services || []);
+        })
+        .catch((err) => {
+          console.error("Error fetching device services:", err);
+          setDeviceServices([]);
+        });
+      
       setSelectedService("");
       setSelectedProfile(null);
       setStep(1);
@@ -184,21 +262,31 @@ headers: { "Content-Type": "application/json" },
         name: "",
         description: "",
         labels: "",
-        adminState: "",
+        adminState: "UNLOCKED",
       });
+      setAutoEvents([]);
+      setShowAutoEventForm(false);
     }
   }, [isModalShow]);
 
+  
   useEffect(() => {
     if (isModalShow && step === 2) {
-      getDevices()
-        .then((res) => setDeviceProfiles(res.data.profiles || []))
-        .catch(() => setDeviceProfiles([]));
+      getAllDeviceProfiles()
+        .then((res) => {
+          setDeviceProfiles(res.data.profiles || []);
+        })
+        .catch((err) => {
+          console.error("Error fetching device profiles:", err);
+          setDeviceProfiles([]);
+        });
     }
   }, [isModalShow, step]);
 
+
+  
   const SelectDevice = () => (
-    <div className="device-summary-body">
+    <div className="device-summary-body" style={{ maxHeight: '400px', overflowY: 'auto' }}>
       {deviceServices.length === 0 ? (
         <p>No device services found.</p>
       ) : (
@@ -229,14 +317,12 @@ headers: { "Content-Type": "application/json" },
               <img src={DeviceIcon} alt="Icon" />
             </div>
             <div className="list-view-item-content">
-              <div className="list-view-item-informations">
                 <div className="list-view-header">
                   <h3>{svc.name}</h3>
                 </div>
                 <div className="device-description">
                   {svc.description || "No description available"}
                 </div>
-              </div>
             </div>
           </div>
         ))
@@ -244,98 +330,90 @@ headers: { "Content-Type": "application/json" },
     </div>
   );
 
+ 
   const DeviceProfile = () => (
-    <div className="device-summary-body">
-      {deviceProfiles.map((profile) => (
-        <div
-          key={profile.name}
-          className={`list-view-item${
-            selectedProfile === profile.name ? " selected" : ""
-          }`}
-          onClick={() => setSelectedProfile(profile.name)}
-          style={{
-            cursor: "pointer",
-            boxShadow:
-              selectedProfile === profile.name
-                ? "inset 0 0 0 9999px rgba(0, 123, 255, 0.15)"
-                : "none",
-            border:
-              selectedProfile === profile.name
-                ? "1px solid rgba(0, 123, 255, 0.4)"
-                : "1px solid #ddd",
-            borderRadius: "8px",
-            padding: "12px",
-            marginBottom: "10px",
-            transition: "all 0.2s ease-in-out",
-          }}
-        >
-          <div className="list-view-item-icon">
-            <img src={DeviceIcon} alt="Icon" />
-          </div>
-          <div className="list-view-item-content">
-            <div className="list-view-item-informations">
-              <div className="list-view-header">
-                <h3>{profile.name}</h3>
-              </div>
-              <div className="device-description">{profile.description}</div>
+    <div className="device-summary-body" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+      {deviceProfiles.length === 0 ? (
+        <p>No device profiles found.</p>
+      ) : (
+        deviceProfiles.map((profile) => (
+          <div
+            key={profile.name}
+            className={`list-view-item${
+              selectedProfile === profile.name ? " selected" : ""
+            }`}
+            onClick={() => setSelectedProfile(profile.name)}
+            style={{
+              cursor: "pointer",
+              boxShadow:
+                selectedProfile === profile.name
+                  ? "inset 0 0 0 9999px rgba(0, 123, 255, 0.15)"
+                  : "none",
+              border:
+                selectedProfile === profile.name
+                  ? "1px solid rgba(0, 123, 255, 0.4)"
+                  : "1px solid #ddd",
+              borderRadius: "8px",
+              padding: "12px",
+              marginBottom: "10px",
+              transition: "all 0.2s ease-in-out",
+            }}
+          >
+            <div className="list-view-item-icon">
+              <img src={DeviceIcon} alt="Icon" />
+            </div>
+            <div className="list-view-item-content">
+                <div className="list-view-header">
+                  <h3>{profile.name}</h3>
+                </div>
+                <div className="device-description">{profile.description || "No description"}</div>
             </div>
           </div>
-        </div>
-      ))}
+        ))
+      )}
     </div>
   );
 
+  
   const CreateAutoEvent = () => {
-    const [showAutoEventForm, setShowAutoEventForm] = useState(false);
-    const [autoEvents, setAutoEvents] = useState([]);
-
-    const handleAddAutoEvent = () => {
-      setShowAutoEventForm(true);
-      setAutoEvents([
-        { interval: "", unit: "millisecond", onChange: "false", resource: "" },
-      ]);
-    };
-
-    const handleAutoEventChange = (index, field, value) => {
-      const updatedEvents = [...autoEvents];
-      updatedEvents[index][field] = value;
-      setAutoEvents(updatedEvents);
-    };
-
-    const handleRemove = (index) => {
-      const updatedEvents = autoEvents.filter((_, i) => i !== index);
-      setAutoEvents(updatedEvents);
-    };
-
-    const handleAddMore = () => {
-      setAutoEvents([
-        ...autoEvents,
-        { interval: "", unit: "millisecond", onChange: "false", resource: "" },
-      ]);
-    };
-
     return (
       <div className="steps-body-item">
         {!showAutoEventForm ? (
           <div style={{ textAlign: "center", marginTop: "30px" }}>
             <button
-              className="btn-primary"
+              className="btn-primary" 
               style={{
-                display: "flex",
+                display: "inline-flex", 
                 alignItems: "center",
                 gap: "8px",
                 padding: "8px 16px",
                 borderRadius: "6px",
+                cursor: "pointer"
               }}
               onClick={handleAddAutoEvent}
+              disabled={!selectedProfile}
             >
               <img src={PlusIcon} alt="Icon" style={{ width: "18px" }} />
               <span>Add Auto Events</span>
             </button>
             <p style={{ marginTop: "12px", fontSize: "14px", color: "#666" }}>
-              This step is optional. You can skip it and set it later in edit
-              mode.
+              This step is optional. You can skip it and set it later in edit mode.
             </p>
+            {!selectedProfile && (
+              <p style={{ marginTop: "8px", fontSize: "12px", color: "#ff6b6b" }}>
+                Please select a device profile first to see available resources.
+              </p>
+            )}
+            {selectedProfile && availableResources.length > 0 && (
+              <div style={{ marginTop: "10px", padding: "10px", backgroundColor: "#f0f8ff", borderRadius: "4px" }}>
+                <strong>Available Resources for {selectedProfile}:</strong> {availableResources.join(', ')}
+              </div>
+            )}
+            {selectedProfile && availableResources.length === 0 && (
+              <div style={{ marginTop: "10px", padding: "10px", backgroundColor: "#fff3cd", borderRadius: "4px" }}>
+                <strong>No resources found</strong> in the selected profile. Auto events cannot be added.
+              </div>
+            )}
           </div>
         ) : (
           <div
@@ -344,8 +422,16 @@ headers: { "Content-Type": "application/json" },
               flexDirection: "column",
               alignItems: "center",
               marginTop: "20px",
+              maxHeight: '400px', 
+              overflowY: 'auto'
             }}
           >
+            {availableResources.length > 0 && (
+              <div style={{ marginBottom: "15px", padding: "10px", backgroundColor: "#f0f8ff", borderRadius: "4px", width: "100%" }}>
+                <strong>Available Resources for {selectedProfile}:</strong> {availableResources.join(', ')}
+              </div>
+            )}
+            
             {autoEvents.map((event, idx) => (
               <div
                 key={idx}
@@ -363,41 +449,41 @@ headers: { "Content-Type": "application/json" },
                   <label style={{ display: "block", marginBottom: "6px" }}>
                     Interval
                   </label>
-                  <input
-                    type="number"
-                    placeholder="Enter interval"
-                    value={event.interval}
-                    onChange={(e) =>
-                      handleAutoEventChange(idx, "interval", e.target.value)
-                    }
-                    style={{
-                      width: "55%",
-                      padding: "14px",
-                      border: "1px solid #ccc",
-                      borderRadius: "6px",
-                    }}
-                  />
+                  <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                    <input
+                      type="number"
+                      placeholder="Enter interval"
+                      value={event.interval}
+                      onChange={(e) =>
+                        handleAutoEventChange(idx, "interval", e.target.value)
+                      }
+                      style={{
+                        width: "120px",
+                        padding: "14px",
+                        border: "1px solid #ccc",
+                        borderRadius: "6px",
+                      }}
+                    />
+                    <select
+                      value={event.unit}
+                      onChange={(e) =>
+                        handleAutoEventChange(idx, "unit", e.target.value)
+                      }
+                      style={{
+                        width: "150px",
+                        padding: "14px",
+                        border: "1px solid #ccc",
+                        borderRadius: "6px",
+                      }}
+                    >
+                      <option value="millisecond">milliseconds</option>
+                      <option value="second">seconds</option>
+                      <option value="minute">minutes</option>
+                      <option value="hour">hours</option>
+                    </select>
+                  </div>
                 </div>
-                <div style={{ marginBottom: "15px" }}>
-                  <label style={{ display: "block", marginBottom: "6px" }}>
-                    Unit
-                  </label>
-                  <select
-                    value={event.unit}
-                    onChange={(e) =>
-                      handleAutoEventChange(idx, "unit", e.target.value)
-                    }
-                    style={{
-                      width: "55%",
-                      padding: "14px",
-                      border: "1px solid #ccc",
-                      borderRadius: "6px",
-                    }}
-                  >
-                    <option value="millisecond">millisecond</option>
-                    <option value="second">second</option>
-                  </select>
-                </div>
+                
                 <div style={{ marginBottom: "15px" }}>
                   <label style={{ display: "block", marginBottom: "6px" }}>
                     On Change
@@ -414,17 +500,16 @@ headers: { "Content-Type": "application/json" },
                       borderRadius: "6px",
                     }}
                   >
-                    <option value="false">false</option>
-                    <option value="true">true</option>
+                    <option value="false">false (read on interval)</option>
+                    <option value="true">true (read only on value change)</option>
                   </select>
                 </div>
+                
                 <div style={{ marginBottom: "15px" }}>
                   <label style={{ display: "block", marginBottom: "6px" }}>
-                    Resource
+                    Resource *
                   </label>
-                  <input
-                    type="text"
-                    placeholder="Resource"
+                  <select
                     value={event.resource}
                     onChange={(e) =>
                       handleAutoEventChange(idx, "resource", e.target.value)
@@ -435,12 +520,29 @@ headers: { "Content-Type": "application/json" },
                       border: "1px solid #ccc",
                       borderRadius: "6px",
                     }}
-                  />
+                    disabled={availableResources.length === 0}
+                  >
+                    <option value="">Select a resource</option>
+                    {availableResources.map(resource => (
+                      <option key={resource} value={resource}>
+                        {resource}
+                      </option>
+                    ))}
+                  </select>
+                  <small style={{ display: "block", marginTop: "5px", color: "#666" }}>
+                    Must be a valid resource from the selected device profile
+                  </small>
+                  {availableResources.length === 0 && (
+                    <small style={{ display: "block", marginTop: "5px", color: "#ff6b6b" }}>
+                      No resources found in the selected profile
+                    </small>
+                  )}
                 </div>
+                
                 <div style={{ marginTop: "20px" }}>
                   <button
                     type="button"
-                    onClick={() => handleRemove(idx)}
+                    onClick={() => handleRemoveAutoEvent(idx)}
                     style={{
                       background: "#e74c3c",
                       color: "#fff",
@@ -455,7 +557,7 @@ headers: { "Content-Type": "application/json" },
                   </button>
                   <button
                     type="button"
-                    onClick={handleAddMore}
+                    onClick={handleAddMoreAutoEvent}
                     style={{
                       background: "#3498db",
                       color: "#fff",
@@ -476,6 +578,7 @@ headers: { "Content-Type": "application/json" },
     );
   };
 
+  
   const AvailableProtocolTemplate = ({
     selectedProtocol,
     setSelectedProtocol,
@@ -494,11 +597,12 @@ headers: { "Content-Type": "application/json" },
 
     return (
       <div className="form-control-item">
-        <label className="block text-sm font-medium mb-2">Protocol Name</label>
+        <label className="label" style={{display: 'block', marginBottom: '8px'}}>Protocol Name</label>
         <select
           value={selectedProtocol}
           onChange={(e) => setSelectedProtocol(e.target.value)}
-          className="form-control"
+          className="form-control" // Assuming you have this class
+          style={{width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ccc'}}
         >
           <option value="">-- Select Protocol --</option>
           {protocols.map((proto) => (
@@ -514,17 +618,13 @@ headers: { "Content-Type": "application/json" },
   const CustomProtocolTemplates = () => (
     <div className="form-control-item">
       <p className="text-gray-700 text-sm">This is Custom Protocol Template</p>
+      
     </div>
   );
 
   const CreateDeviceProtocol = () => {
     const [activeTab, setActiveTab] = useState("available");
     const [selectedProtocol, setSelectedProtocol] = useState("");
-
-    const TAB_HEADING = [
-      { id: "available", label: "Available Protocol Templates" },
-      { id: "custom", label: "Custom Protocol Templates" },
-    ];
 
     const renderContent = () => {
       switch (activeTab) {
@@ -551,7 +651,7 @@ headers: { "Content-Type": "application/json" },
             activeTab={activeTab}
             onTabClick={(id) => setActiveTab(id)}
           />
-          <div className="tab-body border rounded-lg p-4 bg-white shadow-sm">
+          <div className="tab-body" style={{border: '1px solid #eee', borderRadius: '8px', padding: '20px', background: 'white', boxShadow: '0 2px 4px rgba(0,0,0,0.05)'}}>
             {renderContent()}
           </div>
         </div>
@@ -559,21 +659,20 @@ headers: { "Content-Type": "application/json" },
     );
   };
 
+  
   const renderStepContent = () => {
     switch (step) {
       case 1:
         return <SelectDevice />;
       case 2:
         return <DeviceProfile />;
-   case 3:
-  return (
-    <DevicePrimary
-      formValues={formValues}
-      setFormValues={setFormValues}   // ✅ pass this instead
-    />
-  );
-
-
+      case 3:
+        return (
+          <DevicePrimary
+            formValues={formValues}
+            setFormValues={setFormValues}
+          />
+        );
       case 4:
         return <CreateAutoEvent key={isModalShow ? "auto-event" : "auto-event-closed"} />;
       case 5:
@@ -584,27 +683,27 @@ headers: { "Content-Type": "application/json" },
   };
 
   const isPrimaryValid = useMemo(() => {
+    
     return (
-      formValues.name.trim() !== "" ||
-      formValues.description.trim() !== "" ||
-      formValues.labels.trim() !== "" ||
-      formValues.adminState.trim() !== ""
+      formValues.name.trim() !== "" &&
+      formValues.description.trim() !== "" &&
+      selectedService &&
+      selectedProfile
     );
   }, [
     formValues.name,
     formValues.description,
-    formValues.labels,
-    formValues.adminState,
+    selectedService,
+    selectedProfile,
   ]);
-  
 
+  
   const AddNewDevice = () => (
     <div className="steps-wrapper">
       <div className="steps-header">
         <ul className="steps-list">
           <li className={step === 1 ? "active" : step > 1 ? "done" : ""}>
-            <span className
-="steps-count">01</span>
+            <span className="steps-count">01</span>
             <span className="steps-label">Select Device Service</span>
           </li>
           <li className={step === 2 ? "active" : step > 2 ? "done" : ""}>
@@ -627,6 +726,15 @@ headers: { "Content-Type": "application/json" },
       </div>
       <div className="steps-body">{renderStepContent()}</div>
       <div className="steps-footer">
+        {step > 1 && (
+          <button
+            onClick={prevStep}
+            className="btn-without-border no-btn"
+          >
+            <img src={BackIcon} alt="Back" />
+            Back
+          </button>
+        )}
         {step < 5 && (
           <button
             onClick={nextStep}
@@ -634,7 +742,7 @@ headers: { "Content-Type": "application/json" },
             disabled={
               (step === 1 && !selectedService) ||
               (step === 2 && !selectedProfile) ||
-              (step === 3 && !isPrimaryValid)
+              (step === 3 && !isPrimaryValid) 
             }
           >
             Next
@@ -643,19 +751,10 @@ headers: { "Content-Type": "application/json" },
         {step === 5 && (
           <button
             className="btn-secondary green"
-            onClick={() => handleAddSave(formValues)} // 🔹 pass your collected values
+            onClick={() => handleAddSave(formValues)}
+            disabled={!isPrimaryValid} 
           >
             Submit
-          </button>
-        )}
-        {step > 1 && (
-          <button
-            onClick={prevStep}
-            disabled={step === 1}
-            className="btn-without-border no-btn"
-          >
-            <img src={BackIcon} alt="Back" />
-            Back
           </button>
         )}
         <p>
@@ -664,11 +763,8 @@ headers: { "Content-Type": "application/json" },
       </div>
     </div>
   );
-  // Highlight and select logic for device cards
-  const handleDeviceClick = (deviceId) => {
-    setSelectedDevices([deviceId]); // Only one selection at a time
-  };
 
+ 
   return (
     <>
       <div className="device-summary-actions">
@@ -685,26 +781,17 @@ headers: { "Content-Type": "application/json" },
             type="button"
             className={`no-btn btn-without-border${selectedDevices.length > 0 ? '' : ' disabled'}`}
             disabled={selectedDevices.length === 0}
-            onClick={async () => {
-              if (selectedDevices.length > 0) {
-                const deviceId = selectedDevices[0];
-                const device = devices.find(d => d.id === deviceId);
-                if (!device) {
-                  alert('Device not found');
-                  return;
-                }
-                try {
-                  await deleteDevice(device.name); // Use the correct delete API
-                  setDevices(prev => prev.filter(d => d.id !== deviceId));
-                  setSelectedDevices([]);
-                  alert('Device deleted successfully!');
-                } catch (err) {
-                  alert('Failed to delete device: ' + (err?.response?.data?.message || err.message));
-                }
-              }
-            }}
+            onClick={handleDeleteDevice}
           >
             <span>Delete</span>
+          </button>
+          <button
+            type="button"
+            className="no-btn btn-without-border"
+            onClick={fetchDevices}
+            title="Refresh device list"
+          >
+            <span>Refresh</span>
           </button>
         </div>
         <div className="device-more-actions">

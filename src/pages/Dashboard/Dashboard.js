@@ -8,7 +8,11 @@ import NoWifiIcon from "../../assests/images/no-wifi.svg";
 import SchedulerIcon from "../../assests/images/scheduler.svg";
 import EventIcon from "../../assests/images/events.svg";
 import RoutingIcon from "../../assests/images/rerouting.svg";
-import edgexApi from "../../services/edgexApi";
+import {
+  getAllDeviceServices,
+  getAllDevices,
+  getAllDeviceProfiles,
+} from "../../services/edgexApi";
 
 import DeviceService from "../MetaData/DeviceService";
 import Device from "../MetaData/Device";
@@ -18,22 +22,27 @@ import ProvisionWatcher from "../MetaData/ProvisionWatcher";
 const Dashboard = () => {
   const [cardData, setCardData] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState(null); 
+  const [activeTab, setActiveTab] = useState(null);
   const [showModal, setShowModal] = useState(false);
 
   useEffect(() => {
     async function fetchEdgeXData() {
       try {
+        
         const [servicesRes, devicesRes, profilesRes] = await Promise.all([
-          edgexApi.get("/core-api/api/v3/deviceservice/all"),
-          edgexApi.get("/core-api/api/v3/device/all"),
-          edgexApi.get("/core-api/api/v3/deviceprofile/all"),
+          getAllDeviceServices(), 
+          getAllDevices(),        
+          getAllDeviceProfiles(), 
         ]);
+
+        const services = servicesRes.data.services || [];
+        const devices = devicesRes.data.devices || [];
+        const profiles = profilesRes.data.profiles || [];
 
         setCardData([
           {
             title: "Device Services",
-            value: servicesRes.data.services?.length || 0,
+            value: services.length,
             subtitle: "+2 from last week",
             subtitleColor: "green",
             icon: DesktopIcon,
@@ -42,7 +51,7 @@ const Dashboard = () => {
           },
           {
             title: "Devices",
-            value: devicesRes.data.devices?.length || 0,
+            value: devices.length,
             subtitle: "80% Uptime",
             subtitleColor: "green",
             icon: WifiIcon,
@@ -51,7 +60,7 @@ const Dashboard = () => {
           },
           {
             title: "Device Profiles",
-            value: profilesRes.data.profiles?.length || 0,
+            value: profiles.length,
             subtitle: "Needs attention",
             subtitleColor: "red",
             icon: NoWifiIcon,
@@ -88,6 +97,7 @@ const Dashboard = () => {
         ]);
       } catch (error) {
         console.error("Error fetching EdgeX data:", error);
+        setCardData([]);
       } finally {
         setLoading(false);
       }
@@ -121,21 +131,26 @@ const Dashboard = () => {
         title="Device Management"
         description="Monitor and manage your connected devices"
       />
-      <div className="cards-wrapper">
-        {cardData.map((card, index) => (
-          <Card
-            {...card}
-            key={index}
-            onClick={() => {
-              setActiveTab(card.tab);
-              setShowModal(true); 
-            }}
-            style={{ cursor: "pointer" }}
-          />
-        ))}
-      </div>
 
-      {/* Modal to show tab content */}
+      {loading ? (
+        <p>Loading dashboard data...</p>
+      ) : (
+        <div className="cards-wrapper">
+          {cardData.map((card, index) => (
+            <Card
+              {...card}
+              key={index}
+              onClick={() => {
+                setActiveTab(card.tab);
+                setShowModal(true);
+              }}
+              style={{ cursor: "pointer" }}
+            />
+          ))}
+        </div>
+      )}
+
+      
       {showModal && (
         <Modal
           title={

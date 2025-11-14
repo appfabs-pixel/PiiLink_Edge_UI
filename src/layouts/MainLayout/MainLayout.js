@@ -4,11 +4,11 @@ import Footer from "../../components/Footer";
 import Sidebar from "../../components/Sidebar";
 import './MainLayout.scss';
 
-const MainLayout = ({ children }) => {
-
+const MainLayout = ({ children, onLogout }) => {
   return (
     <div className="app-wrapper">
-      <Header />
+      {}
+      <Header onLogout={onLogout} />
       <div className="wrapper">
         <Sidebar />
         <main className="page-content">

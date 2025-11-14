@@ -1,102 +1,40 @@
 const { createProxyMiddleware } = require("http-proxy-middleware");
 
+
+const edgeXTarget = {
+  target: "https://localhost:8443",
+  changeOrigin: true,
+  secure: false, 
+};
+
 module.exports = function (app) {
+  
   app.use(
-    "/metadata-api",
+    "/v1",
     createProxyMiddleware({
-      target: "http://localhost:59890", // Core Command/Data service
+      target: "http://localhost:8200",
       changeOrigin: true,
-      pathRewrite: { "^/metadata-api": "" },
-      // logLevel: 'debug',
+      secure: false,
     })
   );
 
-  app.use(
-    "/core-api",
-    createProxyMiddleware({
-      target: "http://localhost:59881",
-      changeOrigin: true,
-      pathRewrite: { "^/core-api": "" },
-    })
-  );
+  
+  app.use("/core-data", createProxyMiddleware(edgeXTarget)); 
+ 
+  app.use("/core-metadata", createProxyMiddleware(edgeXTarget)); 
+  app.use("/core-keeper", createProxyMiddleware(edgeXTarget));
+  app.use("/core-command", createProxyMiddleware(edgeXTarget));
 
-  app.use(
-    "/core-data",
-    createProxyMiddleware({
-      target: "http://localhost:59880",
-      changeOrigin: true,
-      pathRewrite: { "^/core-data": "" },
-    })
-  );
+  app.use("/support-notifications", createProxyMiddleware(edgeXTarget));
+  app.use("/support-scheduler", createProxyMiddleware(edgeXTarget));
 
-  app.use(
-    "/core-command",
-    createProxyMiddleware({
-      target: "http://localhost:59882",
-      changeOrigin: true,
-      pathRewrite: { "^/core-command": "" },
-    })
-  );
 
-  app.use(
-    "/support-notifications",
-    createProxyMiddleware({
-      target: "http://localhost:59860",
-      changeOrigin: true,
-      pathRewrite: { "^/support-notifications": "" },
-    })
-  );
+  app.use("/device-virtual", createProxyMiddleware(edgeXTarget));
+  app.use("/device-rest", createProxyMiddleware(edgeXTarget));
+  app.use("/app-rules-engine", createProxyMiddleware(edgeXTarget));
+  app.use("/security-proxy-auth", createProxyMiddleware(edgeXTarget));
+  
 
-  app.use(
-    "/support-scheduler",
-    createProxyMiddleware({
-      target: "http://localhost:59863",
-      changeOrigin: true,
-      pathRewrite: { "^/support-scheduler": "" },
-    })
-  );
-
-  app.use(
-    "/sys-mgmt-agent",
-    createProxyMiddleware({
-      target: "http://localhost:59890",
-      changeOrigin: true,
-      pathRewrite: { "^/sys-mgmt-agent": "" },
-    })
-  );
-  app.use(
-    "/app-rules-engine",
-    createProxyMiddleware({
-      target: "http://localhost:59701",
-      changeOrigin: true,
-      pathRewrite: { "^/app-rules-engine": "" },
-    })
-  );
-
-  app.use(
-    "/device-rest",
-    createProxyMiddleware({
-      target: "http://localhost:59986",
-      changeOrigin: true,
-      pathRewrite: { "^/device-rest": "" },
-    })
-  );
-
-  app.use(
-    "/device-virtual",
-    createProxyMiddleware({
-      target: "http://localhost:59900",
-      changeOrigin: true,
-      pathRewrite: { "^/device-virtual": "" },
-    })
-  );
-
-  app.use(
-    "/device-opcua",
-    createProxyMiddleware({
-      target: "http://localhost:59997",
-      changeOrigin: true,
-      pathRewrite: { "^/device-opcua": "" },
-    })
-  );
+  app.use("/device-mqtt", createProxyMiddleware(edgeXTarget));
+  app.use("/device-opcua", createProxyMiddleware(edgeXTarget));
 };

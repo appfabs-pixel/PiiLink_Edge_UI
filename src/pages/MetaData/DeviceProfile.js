@@ -2,16 +2,21 @@ import React, { useEffect, useState } from "react";
 import ListView from "../../components/ListVIew";
 import TableView from "../../components/TableView";
 import Modal from "../../components/Modal";
-import edgexApi, { getDevices } from "../../services/edgexApi";
+
+import {
+  getAllDeviceProfiles,
+  addDeviceProfile,
+  updateDeviceProfile,
+} from "../../services/edgexApi";
+
 import { v4 as uuidv4 } from "uuid";
 import yaml from "js-yaml";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import DeviceIcon from "../../assests/images/HardDrives.svg";
-import TableTopActions from "../../components/TableTopActions"; // ✅ toggle component
+import TableTopActions from "../../components/TableTopActions";
 import "./DeviceProfile.scss";
 
-// ---- CodeMirror imports ----
 import CodeMirror from "@uiw/react-codemirror";
 import { json } from "@codemirror/lang-json";
 import { yaml as yamlLang } from "@codemirror/lang-yaml";
@@ -23,32 +28,41 @@ const DeviceProfile = () => {
   const [selectedIds, setSelectedIds] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProfile, setEditingProfile] = useState(null);
-  const [isListView, setIsListView] = useState(true); // ✅ toggle state
+  const [isListView, setIsListView] = useState(true);
 
-  // Fetch device profiles
-  const fetchDeviceProfiles = async () => {
-    try {
-      setLoading(true);
-      const response = await getDevices();
-      const profiles = response.data.profiles || [];
-      setDeviceProfiles(
-        profiles.map((p, idx) => ({
-          id: p.id || idx + 1,
-          name: p.name,
-          description: p.description,
-          manufacturer: p.manufacturer,
-          model: p.model,
-          labels: Array.isArray(p.labels) ? p.labels.join(", ") : "",
-          raw: p,
-        }))
-      );
-    } catch (error) {
-      toast.error("Failed to fetch device profiles");
-      setDeviceProfiles([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+
+const fetchDeviceProfiles = async () => {
+  try {
+    setLoading(true);
+    const response = await getAllDeviceProfiles();
+    console.log("Profiles API Response:", response.data);
+
+    const profiles =
+      response.data?.profiles ||
+      response.data?.data?.profiles ||
+      response.data?.response?.profiles ||
+      [];
+
+    setDeviceProfiles(
+      profiles.map((p, idx) => ({
+        id: p.id || idx + 1,
+        name: p.name,
+        description: p.description || "",
+        manufacturer: p.manufacturer || "",
+        model: p.model || "",
+        labels: Array.isArray(p.labels) ? p.labels.join(", ") : "",
+        raw: p,
+      }))
+    );
+  } catch (error) {
+    console.error("Fetch Device Profiles Error:", error);
+    toast.error("Failed to fetch device profiles");
+    setDeviceProfiles([]);
+  } finally {
+    setLoading(false);
+  }
+};
+
 
   useEffect(() => {
     fetchDeviceProfiles();
@@ -77,34 +91,12 @@ const DeviceProfile = () => {
     setIsModalOpen(true);
   };
 
-  // Delete
   const handleDelete = async () => {
     if (selectedIds.length === 0) return;
-    if (
-      !window.confirm(
-        `Are you sure you want to delete ${selectedIds.length} profile(s)?`
-      )
-    )
-      return;
-
-    try {
-      const toDelete = deviceProfiles.filter((p) => selectedIds.includes(p.id));
-      await Promise.all(
-        toDelete.map(async (profile) => {
-          await edgexApi.delete(
-            `/core-api/api/v3/deviceprofile/name/${profile.raw.name}`
-          );
-        })
-      );
-      toast.success("Selected profile(s) deleted successfully!");
-      setSelectedIds([]);
-      await fetchDeviceProfiles();
-    } catch (error) {
-      toast.error("Failed to delete device profile(s).");
-    }
+    toast.warning("Delete feature is disabled for profiles in this version.");
   };
 
-  // Save (Add/Edit)
+
   const handleSave = async (formData, isUpdate) => {
     try {
       let parsedProfile;
@@ -114,10 +106,11 @@ const DeviceProfile = () => {
         try {
           parsedProfile = yaml.load(formData.profileContent);
         } catch (yamlErr) {
-          toast.error("Invalid JSON or YAML. Please check your input.");
+          toast.error("Invalid JSON or YAML format.");
           return;
         }
       }
+
 
       const payload = [
         {
@@ -128,10 +121,12 @@ const DeviceProfile = () => {
       ];
 
       if (isUpdate) {
-        await edgexApi.put("/core-api/api/v3/deviceprofile", payload);
+    
+        await updateDeviceProfile(payload);
         toast.success("Device profile updated successfully!");
       } else {
-        await edgexApi.post("/core-api/api/v3/deviceprofile", payload);
+        
+        await addDeviceProfile(payload);
         toast.success("Device profile added successfully!");
       }
 
@@ -140,11 +135,14 @@ const DeviceProfile = () => {
       setEditingProfile(null);
       setSelectedIds([]);
     } catch (error) {
+      console.error("Save Error:", error);
       toast.error("Failed to save device profile.");
     }
   };
+ 
 
-  // ListView data
+
+
   const listData = deviceProfiles.map((p) => ({
     id: p.id,
     name: p.name,
@@ -154,10 +152,10 @@ const DeviceProfile = () => {
     description: p.description,
   }));
 
-  // TableView data
+ 
   const TABLE_HEAD = [
     "ID",
-    "Device Name",
+    "Profile Name",
     "Description",
     "Manufacturer",
     "Model",
@@ -165,7 +163,7 @@ const DeviceProfile = () => {
   ];
   const tableData = deviceProfiles.map((p) => ({
     ID: p.id,
-    "Device Name": p.name,
+    "Profile Name": p.name,
     Description: p.description,
     Manufacturer: p.manufacturer,
     Model: p.model,
@@ -175,6 +173,7 @@ const DeviceProfile = () => {
   return (
     <div>
       <div className="device-summary-actions">
+      
         <div className="device-left-summary">
           <button type="button" className="no-btn btn-without-border" onClick={handleAdd}>
             <span>Add</span>
@@ -197,7 +196,6 @@ const DeviceProfile = () => {
           </button>
         </div>
 
-        {/* ✅ TableTopActions for toggle */}
         <div className="device-more-actions">
           <TableTopActions
             isListView={isListView}
@@ -207,6 +205,7 @@ const DeviceProfile = () => {
       </div>
 
       <div className="device-summary-body">
+    
         {loading ? (
           <p>Loading...</p>
         ) : deviceProfiles.length === 0 ? (
@@ -255,12 +254,13 @@ const DeviceProfile = () => {
   );
 };
 
-// -------- ProfileForm (Add/Edit) --------
+
 function ProfileForm({ profile, onCancel, onSave }) {
   const [profileContent, setProfileContent] = useState("");
 
   useEffect(() => {
     if (profile) {
+     
       setProfileContent(JSON.stringify(profile.raw, null, 2));
     } else {
       setProfileContent("");
